@@ -1,34 +1,34 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
-
-function App() {
-  const [count, setCount] = useState(0)
-
+function App () {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <div className="container">
+      <header>
+        <h1>Focus Flow (alpha)</h1>
+        <nav>
+          <a href="https://forms.gle" target="_blank" rel="noreferrer">
+            Feedback
+          </a>
+        </nav>
+      </header>
+
+      <section>
+        <h2>Tasks</h2>
+        <p>Task list will go here.</p>
+      </section>
+
+      <section>
+        <h2>Focus</h2>
+        <p>Countdown timer will go here.</p>
+      </section>
+
+      <section>
+        <h2>Reports</h2>
+        <p>Charts will go here.</p>
+      </section>
+
+      <footer>
+        <p>Alpha note: your data is stored locally in your browser.</p>
+      </footer>
+    </div>
   )
 }
 
