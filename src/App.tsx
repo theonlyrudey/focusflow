@@ -1,3 +1,4 @@
+import Tasks from "./components/Tasks";
 function App () {
   return (
     <div className="container">
@@ -10,10 +11,7 @@ function App () {
         </nav>
       </header>
 
-      <section>
-        <h2>Tasks</h2>
-        <p>Task list will go here.</p>
-      </section>
+      <Tasks />
 
       <section>
         <h2>Focus</h2>
