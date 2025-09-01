@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
 import Focus from "./components/Focus";
 import Tasks from "./components/Tasks";
-import { type Task} from "./state/types";
+import Queue from "./components/Queue";
+import { type Task, type QueueItem} from "./state/types";
 import { load, save } from "./state/storage";
 
 const TASKS_KEY = "tasks:v1";
+const QUEUE_KEY = "queue:v1";
 
 function App () {
   const [tasks, setTasks] = useState<Task[]>(() => load<Task[]>(TASKS_KEY, []));
+  const [queue, setQueue] = useState<QueueItem[]>(() => load<QueueItem[]>(QUEUE_KEY, []));
 
-  useEffect(() => {
-    save(TASKS_KEY, tasks);
-  }, [tasks]);
+  useEffect(() => { save(TASKS_KEY, tasks); }, [tasks]);
+  useEffect(() => { save(QUEUE_KEY, queue); }, [queue]);
 
   return (
     <div className="container">
@@ -25,7 +27,8 @@ function App () {
       </header>
 
       <Tasks tasks={tasks} setTasks={setTasks} />
-      <Focus tasks={tasks}/>
+      <Queue tasks={tasks} queue={queue} setQueue={setQueue} />
+      <Focus tasks={tasks} queue={queue} setQueue={setQueue}/>
 
       <section>
         <h2>Reports</h2>

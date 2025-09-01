@@ -1,113 +1,121 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmt } from "../state/time";
 import { load, save } from "../state/storage";
-import { type Task } from "../state/types";
+import {type QueueItem, type Task} from "../state/types";
+import * as React from "react";
 
 // We'll read tasks by asking the user to pass them from App
 // to keep this component focused on timer logic.
 type Props = {
   tasks: Task[];
+  queue?: QueueItem[];
+  setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
 };
 
 type TimerState = "idle" | "running" | "paused";
 
 // Keep a bit of state in localStorage so refreshes don't lose it
-const STORAGE_KEY = "focus:ui:v1";
+const STORAGE_KEY = "focus:ui:v3";
 
 type Saved = {
-  selectedTaskId: string | null;
-  defaultMinutes: number;
+  index: number;
   remainingSec: number;
   state: TimerState;
 }
 
 const DEFAULT_SAVED: Saved = {
-  selectedTaskId: null,
-  defaultMinutes: 25,
-  remainingSec: 25 * 60,
+  index: 0,
+  remainingSec: 0,
   state: "idle",
 };
 
-export default function Focus({ tasks } : Props) {
-  // UI state
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => {
-    return load<Saved>(STORAGE_KEY, DEFAULT_SAVED).selectedTaskId;
-  });
-  const [defaultMinutes, setDefaultMinutes] = useState<number>(() => {
-    return load<Saved>(STORAGE_KEY, DEFAULT_SAVED).defaultMinutes;
-  });
-  const [remainingSec, setRemainingSec] = useState<number>(() => {
-    return load<Saved>(STORAGE_KEY, DEFAULT_SAVED).remainingSec;
-  });
-  const [state, setState] = useState<TimerState>(() => {
-    return load<Saved>(STORAGE_KEY, DEFAULT_SAVED).state;
-  });
+export default function Focus({ tasks, queue = [], setQueue } : Props) {
+  const [index, setIndex] = useState<number>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).index);
+  const [remainingSec, setRemainingSec] = useState<number>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).remainingSec);
+  const [state, setState] = useState<TimerState>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).state);
 
-  // Persist lightweight UI state so a refresh isn't heavy
+  // Persist small UI state
   useEffect(() => {
-    const payload: Saved = { selectedTaskId, defaultMinutes, remainingSec, state };
+    const payload: Saved = { index, remainingSec, state };
     save(STORAGE_KEY, payload);
-  }, [selectedTaskId, defaultMinutes, remainingSec, state]);
+  }, [index, remainingSec, state]);
 
-  // Derived data: current task + next task id
-  const currentIndex = useMemo(
-    () => tasks.findIndex(t => t.id === selectedTaskId),
-    [tasks, selectedTaskId]
-  );
-  const currentTask = currentIndex >= 0 ? tasks[currentIndex] : null;
-  const nextTaskId = currentIndex >= 0  && currentIndex +1 < tasks.length ?
-    tasks[currentIndex + 1].id : null;
+  // Safeguards so we never crash when queue is empty
+  const hasQueue = Array.isArray(queue) && queue.length > 0;
+  const safeIndex = hasQueue
+    ? Math.max(0, Math.min(index, queue.length - 1))
+    : 0;
+
+  const currentItem = hasQueue ? queue[safeIndex] : undefined;
+  const currentTask = useMemo(() => {
+    if (!currentItem) return null;
+    return tasks.find(t => t.id === currentItem.taskId) ?? null;
+  }, [currentItem, tasks]);
+
+  // Actions
+  const start = useCallback(() => {
+    if (!currentItem) return;
+    const dur = Math.max(0, Math.floor(currentItem.durationSec));
+    setRemainingSec(dur);
+    setState("running");
+  }, [currentItem]);
+
+  const pause = useCallback(() => { setState("paused"); }, []);
+
+  const resume = useCallback(() => {
+    if (remainingSec > 0)  setState("running");
+  }, [remainingSec]);
+
+  const add5 = useCallback(() => { setRemainingSec(s => s + 300); }, []);
+
+  const next = useCallback(() => {
+    if (!queue[safeIndex]) {
+      setState("idle");
+      setRemainingSec(0);
+      setIndex(0);
+      return;
+    }
+
+    const newQueue = queue.slice();
+    newQueue.splice(safeIndex, 1); // remove current item
+    setQueue(newQueue);
+
+    const nextItem = newQueue[safeIndex];
+
+    if (nextItem) {
+      setRemainingSec(Math.max(0, Math.floor(nextItem.durationSec)));
+      setState("running");
+      // keep the same index because items shifted left
+    } else {
+      // nothing left at this index, we finished the last item
+      setState("idle");
+      setRemainingSec(0);
+      setIndex(0);
+    }
+  }, [safeIndex, queue, setQueue]);
+
+  const restartItem = useCallback(() => {
+    if (!currentItem) return;
+    setRemainingSec(Math.max(0, Math.floor(currentItem.durationSec)));
+    setState("running");
+  }, [currentItem]);
 
   // The ticking mechanism: run every 1000ms only when "running"
   useEffect(() => {
     if (state !== "running") return;
     const int = setInterval(() => {
       setRemainingSec(prev => {
-        const next = prev - 1;
-        if (next <= 0) {
+        const nextVal = prev - 1;
+        if (nextVal <= 0) {
           clearInterval(int);
-          setState("idle");
+          setTimeout(() => next(), 0);
           return 0;
         }
-        return next;
+        return nextVal;
       });
     }, 1000);
     return () => clearInterval(int);
-  }, [state]);
-
-  // Actions
-  function start() {
-    const minutes = Math.max(1, Math.floor(defaultMinutes) || 25);
-    if (!selectedTaskId && tasks.length > 0) {
-      setSelectedTaskId(tasks[0].id);
-    }
-    setRemainingSec(minutes * 60);
-    setState("running");
-  }
-
-  function pause() {
-    setState("paused");
-  }
-
-  const resume = useCallback(() => {
-    if (remainingSec > 0) {
-      setState("running");
-    }
-  }, [remainingSec]);
-
-  function add5() {
-    setRemainingSec(s => s + 300);
-  }
-
-  const next = useCallback(() => {
-    if (nextTaskId) {
-      setSelectedTaskId(nextTaskId);
-      setRemainingSec(Math.max(1, Math.floor(defaultMinutes) || 25) * 60);
-      setState("running");
-    } else {
-      setState("idle");
-    }
-  }, [defaultMinutes, nextTaskId]);
+  }, [state, next]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -115,11 +123,7 @@ export default function Focus({ tasks } : Props) {
       switch (e.key) {
         case " ":
           e.preventDefault();
-          if (state === "running") {
-            pause();
-          } else {
-            resume();
-          }
+          if (state === "running") { pause(); } else { resume(); }
           break;
         case "ArrowRight":
           e.preventDefault();
@@ -129,68 +133,114 @@ export default function Focus({ tasks } : Props) {
           e.preventDefault();
           add5();
           break;
+        case "r":
+        case "R":
+          if (state !== "running") break;
+          e.preventDefault();
+          restartItem();
+          break;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state, nextTaskId, remainingSec, defaultMinutes, next, resume]);
+  }, [state, pause, resume, next, add5, restartItem]);
+
+  useEffect(() => {
+    // If queue shrank and the current index is now invalid, reset
+    if (!hasQueue) {
+      if (index !== 0) setIndex(0);
+      if (state !== "idle") setState("idle");
+      if (remainingSec !== 0) setRemainingSec(0);
+      return;
+    }
+
+    if (index < 0 || index > queue.length - 1) {
+      setIndex(Math.min(index, queue.length - 1));
+    }
+  }, [hasQueue, index, remainingSec, state, queue.length]);
+
+  // handle queue changes
+  useEffect(() => {
+    if (!queue[safeIndex]) {
+      // if the current index is out of range, reset
+      setIndex(0);
+      setState("idle");
+      setRemainingSec(0);
+    }
+  }, [queue, safeIndex]);
+
+  const showOnlyStart = state === "idle" && remainingSec === 0 && hasQueue;
 
   return (
     <section>
-      <h2>Focus</h2>
+      <h2>Focus (queue runner)</h2>
 
-      {/* Task picker */}
-      <div>
-        <label>
-          Task:&nbsp;
-          <select
-            value={selectedTaskId ?? ""}
-            onChange={e => setSelectedTaskId(e.target.value || null)}
-          >
-            <option value="">(choose a task)</option>
-            {tasks.map(t => (
-              <option key={t.id} value={t.id}>{t.title}</option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {queue.length === 0 ? (
+        <p>Queue is empty. Add items above to start.</p>
+      ) : (
+        <>
+          <p>
+            Now: <strong>{currentTask?.title ?? "(unknown task)"}</strong>&nbsp;
+          </p>
 
-      {/* Session length input (minutes) */}
-      <div style={{ marginTop: 8}}>
-        <label>
-          Session length (minutes):&nbsp;
-          <input
-            type="number"
-            min={1}
-            value={defaultMinutes}
-            onChange={e => setDefaultMinutes(Number(e.target.value))}
-            style={{ width: 80}}
-          />
-        </label>
-      </div>
+          {/* Countdown */}
+          <div style={{ fontSize: 48, fontVariantNumeric: "tabular-nums" }}>
+            {fmt(remainingSec)}
+          </div>
 
-      {/* Countdown */}
-      <div style={{ marginTop: 12, fontSize: 48, fontVariantNumeric: "tabular-nums" }}>
-        {fmt(remainingSec)}
-      </div>
+          {/* Controls */}
+          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {showOnlyStart ? (
+              <button
+                onClick={start}
+                style={{ padding: "10px 18px", fontSize: 16 }}
+              >Start
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={next}
+                  style={{
+                    padding: "12px 22px",
+                    fontSize: 18,
+                    fontWeight: 600,
+                    border: "1px solid #ccc",
+                    borderRadius: 6,
+                    background: "#efefef"
+                  }}
+                >
+                  Next ▶
+                </button>
+                {state === "running"
+                  ? (<button onClick={pause}>Pause</button> )
+                  : ( <button onClick={resume} disabled={remainingSec === 0}>Resume</button>)
+                }
+                <button onClick={add5}>+5 min</button>
+                <button onClick={restartItem}>Restart</button>
+              </>
+              )}
+          </div>
 
-      {/* Controls */}
-      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {state === "running" ? (
-          <button onClick={pause}>Pause</button>
-        ) : (
-          <button onClick={currentTask ? resume : start}>
-            {currentTask ? "Resume" : "Start"}
-          </button>
-        )}
-        <button onClick={add5}>+5 min</button>
-        <button onClick={next}>Next ▶</button>
-      </div>
+          {/* Small hint */}
+          <p style={{ color: "#666", marginTop: 8 }}>
+            Shortcuts: Space = Pause/Resume • + = +5 min • → = Next
+          </p>
 
-      {/* Small hint */}
-      <p style={{ color: "#666", marginTop: 8 }}>
-        Shortcuts: Space = Pause/Resume • + = +5 min • → = Next
-      </p>
+          <details style={{ marginTop: 8 }}>
+            <summary>Queue preview</summary>
+            <ol style={{ paddingLeft: 18, marginTop: 8 }}>
+              {queue.map((q, i) => {
+                const t = tasks.find(x => x.id === q.taskId);
+                return (
+                  <li key={q.id} style={{ opacity: i < safeIndex ? 0.6 : 1 }}>
+                    {i === safeIndex ? <strong>{t?.title}</strong> : t?.title} - {Math.floor(q.durationSec / 60)} min
+                  </li>
+                );
+              })}
+            </ol>
+          </details>
+        </>
+      )}
     </section>
   );
 }
