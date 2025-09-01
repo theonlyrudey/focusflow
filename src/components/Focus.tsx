@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmt } from "../state/time";
 import { load, save } from "../state/storage";
 import {type QueueItem, type Task} from "../state/types";
+import { Sessions } from "../state/sessions";
 import * as React from "react";
 
 // We'll read tasks by asking the user to pass them from App
@@ -21,24 +22,29 @@ type Saved = {
   index: number;
   remainingSec: number;
   state: TimerState;
+  currentSessionId?: string | null;
 }
 
 const DEFAULT_SAVED: Saved = {
   index: 0,
   remainingSec: 0,
   state: "idle",
+  currentSessionId: null,
 };
 
 export default function Focus({ tasks, queue = [], setQueue } : Props) {
   const [index, setIndex] = useState<number>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).index);
   const [remainingSec, setRemainingSec] = useState<number>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).remainingSec);
   const [state, setState] = useState<TimerState>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).state);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
+    return load<Saved>(STORAGE_KEY, DEFAULT_SAVED).currentSessionId ?? null;
+  });
 
   // Persist small UI state
   useEffect(() => {
-    const payload: Saved = { index, remainingSec, state };
+    const payload: Saved = { index, remainingSec, state, currentSessionId };
     save(STORAGE_KEY, payload);
-  }, [index, remainingSec, state]);
+  }, [index, remainingSec, state, currentSessionId]);
 
   // Safeguards so we never crash when queue is empty
   const hasQueue = Array.isArray(queue) && queue.length > 0;
@@ -56,19 +62,34 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
   const start = useCallback(() => {
     if (!currentItem) return;
     const dur = Math.max(0, Math.floor(currentItem.durationSec));
+    const sid = Sessions.start(currentItem.taskId);
+
+    setCurrentSessionId(sid);
     setRemainingSec(dur);
     setState("running");
   }, [currentItem]);
 
-  const pause = useCallback(() => { setState("paused"); }, []);
+  const pause = useCallback(() => {
+    setState("paused");
+    if (currentSessionId) Sessions.pause(currentSessionId);
+  }, [currentSessionId]);
 
   const resume = useCallback(() => {
-    if (remainingSec > 0)  setState("running");
-  }, [remainingSec]);
+    if (remainingSec > 0) {
+      setState("running");
+      if (currentSessionId) Sessions.resume(currentSessionId);
+    }
+  }, [remainingSec, currentSessionId]);
 
   const add5 = useCallback(() => { setRemainingSec(s => s + 300); }, []);
 
+  // Next : end session, remove current item, start next session if any
   const next = useCallback(() => {
+    if (currentSessionId) {
+      Sessions.end(currentSessionId);
+      setCurrentSessionId(null);
+    }
+
     if (!queue[safeIndex]) {
       setState("idle");
       setRemainingSec(0);
@@ -83,6 +104,9 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
     const nextItem = newQueue[safeIndex];
 
     if (nextItem) {
+      const sid = Sessions.start(nextItem.taskId);
+      setCurrentSessionId(sid);
+
       setRemainingSec(Math.max(0, Math.floor(nextItem.durationSec)));
       setState("running");
       // keep the same index because items shifted left
@@ -92,7 +116,7 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
       setRemainingSec(0);
       setIndex(0);
     }
-  }, [safeIndex, queue, setQueue]);
+  }, [safeIndex, queue, setQueue, currentSessionId]);
 
   const restartItem = useCallback(() => {
     if (!currentItem) return;
@@ -148,6 +172,10 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
   useEffect(() => {
     // If queue shrank and the current index is now invalid, reset
     if (!hasQueue) {
+      if (currentSessionId) {
+        Sessions.end(currentSessionId);
+        setCurrentSessionId(null);
+      }
       if (index !== 0) setIndex(0);
       if (state !== "idle") setState("idle");
       if (remainingSec !== 0) setRemainingSec(0);
@@ -157,7 +185,7 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
     if (index < 0 || index > queue.length - 1) {
       setIndex(Math.min(index, queue.length - 1));
     }
-  }, [hasQueue, index, remainingSec, state, queue.length]);
+  }, [hasQueue, index, remainingSec, state, queue.length, currentSessionId]);
 
   // handle queue changes
   useEffect(() => {

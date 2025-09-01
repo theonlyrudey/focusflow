@@ -14,3 +14,19 @@ export type QueueItem = {
   taskId: ID;           // points to a Task
   durationSec: number;  // per-item duration override
 }
+
+// A data type for a single task session logging
+export type Session = {
+  id: ID;
+  taskId: ID;
+  startAt: number;
+  endAt?: number;
+  durationSec?: number;
+
+  pauses: {
+    pauseAt: number;
+    resumeAt?: number;
+  }[];
+
+  totalPauseSec: number;
+}

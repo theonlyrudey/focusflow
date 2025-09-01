@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Focus from "./components/Focus";
 import Tasks from "./components/Tasks";
 import Queue from "./components/Queue";
+import Reports from "./components/Reports";
 import { type Task, type QueueItem} from "./state/types";
 import { load, save } from "./state/storage";
 
@@ -29,11 +30,7 @@ function App () {
       <Tasks tasks={tasks} setTasks={setTasks} />
       <Queue tasks={tasks} queue={queue} setQueue={setQueue} />
       <Focus tasks={tasks} queue={queue} setQueue={setQueue}/>
-
-      <section>
-        <h2>Reports</h2>
-        <p>Charts will go here.</p>
-      </section>
+      <Reports tasks={tasks} />
 
       <footer>
         <p>Alpha note: your data is stored locally in your browser.</p>
