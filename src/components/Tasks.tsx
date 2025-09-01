@@ -1,18 +1,15 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {type Task } from "../state/types.ts";
-import { load, save } from "../state/storage.ts";
 import { uid } from "../state/id.ts"
+import * as React from "react";
 
-const STORAGE_KEY = "tasks:v1";
+type Props = {
+  tasks: Task[];
+  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
+};
 
-export default function Tasks() {
-  const [tasks, setTasks] = useState<Task[]>(
-    () => load<Task[]>(STORAGE_KEY, []));
+export default function Tasks({ tasks, setTasks}: Props) {
   const [newTitle, setNewTitle] = useState("");
-
-  useEffect(() => {
-    save(STORAGE_KEY, tasks);
-  }, [tasks]);
 
   function addTask() {
     const title = newTitle.trim();

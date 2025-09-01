@@ -1,5 +1,18 @@
+import { useEffect, useState } from "react";
+import Focus from "./components/Focus";
 import Tasks from "./components/Tasks";
+import { type Task} from "./state/types";
+import { load, save } from "./state/storage";
+
+const TASKS_KEY = "tasks:v1";
+
 function App () {
+  const [tasks, setTasks] = useState<Task[]>(() => load<Task[]>(TASKS_KEY, []));
+
+  useEffect(() => {
+    save(TASKS_KEY, tasks);
+  }, [tasks]);
+
   return (
     <div className="container">
       <header>
@@ -11,12 +24,8 @@ function App () {
         </nav>
       </header>
 
-      <Tasks />
-
-      <section>
-        <h2>Focus</h2>
-        <p>Countdown timer will go here.</p>
-      </section>
+      <Tasks tasks={tasks} setTasks={setTasks} />
+      <Focus tasks={tasks}/>
 
       <section>
         <h2>Reports</h2>
