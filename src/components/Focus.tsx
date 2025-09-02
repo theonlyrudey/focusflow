@@ -15,14 +15,14 @@ type Props = {
 
 type TimerState = "idle" | "running" | "paused";
 
-// Keep a bit of state in localStorage so refreshes don't lose it
-const STORAGE_KEY = "focus:ui:v3";
+const STORAGE_KEY = "focusTimer:v1";
 
 type Saved = {
   index: number;
   remainingSec: number;
   state: TimerState;
   currentSessionId?: string | null;
+  endAtTs?: number | null;
 }
 
 const DEFAULT_SAVED: Saved = {
@@ -30,6 +30,7 @@ const DEFAULT_SAVED: Saved = {
   remainingSec: 0,
   state: "idle",
   currentSessionId: null,
+  endAtTs: null,
 };
 
 export default function Focus({ tasks, queue = [], setQueue } : Props) {
@@ -39,10 +40,28 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(() => {
     return load<Saved>(STORAGE_KEY, DEFAULT_SAVED).currentSessionId ?? null;
   });
+  const endAtTsRef = React.useRef<number | null>(
+    load<Saved>(STORAGE_KEY, DEFAULT_SAVED).endAtTs ?? null
+  );
+
+  const setRemainingFromEndAt = React.useCallback(() => {
+    if (endAtTsRef.current == null) return;
+    const msLeft = endAtTsRef.current - Date.now();
+    const secLeft = Math.max(0, Math.ceil(msLeft / 1000));
+    if (secLeft !== remainingSec) {
+      setRemainingSec(secLeft);
+    }
+  }, [remainingSec]);
 
   // Persist small UI state
   useEffect(() => {
-    const payload: Saved = { index, remainingSec, state, currentSessionId };
+    const payload: Saved = {
+      index,
+      remainingSec,
+      state,
+      currentSessionId,
+      endAtTs: endAtTsRef.current ?? null,
+    };
     save(STORAGE_KEY, payload);
   }, [index, remainingSec, state, currentSessionId]);
 
@@ -67,17 +86,24 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
     setCurrentSessionId(sid);
     setRemainingSec(dur);
     setState("running");
+    endAtTsRef.current = Date.now() + dur * 1000;
   }, [currentItem]);
 
   const pause = useCallback(() => {
     setState("paused");
     if (currentSessionId) Sessions.pause(currentSessionId);
+    if (endAtTsRef.current != null){
+      const msLeft = endAtTsRef.current - Date.now();
+      setRemainingSec(Math.max(0, Math.ceil(msLeft / 1000)));
+    }
+    endAtTsRef.current = null;
   }, [currentSessionId]);
 
   const resume = useCallback(() => {
     if (remainingSec > 0) {
       setState("running");
       if (currentSessionId) Sessions.resume(currentSessionId);
+      endAtTsRef.current = Date.now() + remainingSec * 1000;
     }
   }, [remainingSec, currentSessionId]);
 
@@ -94,6 +120,7 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
       setState("idle");
       setRemainingSec(0);
       setIndex(0);
+      endAtTsRef.current = null;
       return;
     }
 
@@ -109,12 +136,14 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
 
       setRemainingSec(Math.max(0, Math.floor(nextItem.durationSec)));
       setState("running");
+      endAtTsRef.current = Date.now() + Math.max(0, Math.floor(nextItem.durationSec)) * 1000;
       // keep the same index because items shifted left
     } else {
       // nothing left at this index, we finished the last item
       setState("idle");
       setRemainingSec(0);
       setIndex(0);
+      endAtTsRef.current = null;
     }
   }, [safeIndex, queue, setQueue, currentSessionId]);
 
@@ -122,21 +151,91 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
     if (!currentItem) return;
     setRemainingSec(Math.max(0, Math.floor(currentItem.durationSec)));
     setState("running");
+    endAtTsRef.current = Date.now() + Math.max(0, Math.floor(currentItem.durationSec)) * 1000;
   }, [currentItem]);
 
-  // The ticking mechanism: run every 1000ms only when "running"
+  const fastForwardIfOverdue = useCallback(() => {
+    if (state !== "running") return;
+    if (endAtTsRef.current == null) return;
+
+    let overflowSec = Math.floor((Date.now() - endAtTsRef.current) / 1000); // >0 means we're late
+    if (overflowSec <= 0) {
+      setRemainingFromEndAt();
+      return;
+    }
+
+    if (currentSessionId) {
+      Sessions.end(currentSessionId);
+      setCurrentSessionId(null);
+    }
+
+    let idx = safeIndex + 1;
+    while (overflowSec > 0 && idx < queue.length) {
+      const d = Math.max(0, Math.floor(queue[idx].durationSec));
+      if (overflowSec >= d) {
+        overflowSec -= d;
+        idx += 1;
+      } else {
+        break;
+      }
+    }
+
+    if (idx >= queue.length) {
+      setIndex(0);
+      setState("idle");
+      setRemainingSec(0);
+      endAtTsRef.current = null;
+      return;
+    }
+
+    const landed = queue[idx];
+    const landedTaskId = landed.taskId;
+    const landedDur = Math.max(0, Math.floor(landed.durationSec));
+    const residual = landedDur - Math.max(0, overflowSec);
+
+    const sid = Sessions.start(landedTaskId);
+    setCurrentSessionId(sid);
+    setIndex(idx);
+    setRemainingSec(residual);
+    setState("running");
+    endAtTsRef.current = Date.now() + residual * 1000;
+  }, [state, setRemainingFromEndAt, currentSessionId, safeIndex, queue]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        fastForwardIfOverdue();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [fastForwardIfOverdue]);
+
+  useEffect(() => {
+    const saved = load<Saved>(STORAGE_KEY, DEFAULT_SAVED);
+    if (saved.state === "running" && saved.endAtTs) {
+      endAtTsRef.current = saved.endAtTs;
+      fastForwardIfOverdue();
+    }
+  }, [fastForwardIfOverdue]);
+
+  // The ticking mechanism: use wall-clock delta so background tabs catch up correctly
   useEffect(() => {
     if (state !== "running") return;
     const int = setInterval(() => {
-      setRemainingSec(prev => {
-        const nextVal = prev - 1;
-        if (nextVal <= 0) {
-          clearInterval(int);
-          setTimeout(() => next(), 0);
-          return 0;
-        }
-        return nextVal;
-      });
+      if (endAtTsRef.current == null) {
+        setRemainingSec(prev => Math.max(0, prev - 1));
+        return;
+      }
+      const msLeft = endAtTsRef.current - Date.now();
+      const secLeft = Math.max(0, Math.ceil(msLeft / 1000));
+      if (secLeft <= 0) {
+        clearInterval(int);
+        setTimeout(() => next(), 0);
+        setRemainingSec(0)
+      } else {
+        setRemainingSec(secLeft);
+      }
     }, 1000);
     return () => clearInterval(int);
   }, [state, next]);
