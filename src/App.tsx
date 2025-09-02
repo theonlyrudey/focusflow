@@ -12,6 +12,7 @@ const QUEUE_KEY = "queue:v1";
 function App () {
   const [tasks, setTasks] = useState<Task[]>(() => load<Task[]>(TASKS_KEY, []));
   const [queue, setQueue] = useState<QueueItem[]>(() => load<QueueItem[]>(QUEUE_KEY, []));
+  const [focusActive, setFocusActive] = useState(false);
 
   useEffect(() => { save(TASKS_KEY, tasks); }, [tasks]);
   useEffect(() => { save(QUEUE_KEY, queue); }, [queue]);
@@ -27,10 +28,25 @@ function App () {
         </nav>
       </header>
 
-      <Tasks tasks={tasks} setTasks={setTasks} />
-      <Queue tasks={tasks} queue={queue} setQueue={setQueue} />
-      <Focus tasks={tasks} queue={queue} setQueue={setQueue}/>
-      <Reports tasks={tasks} />
+      {!focusActive && (
+        <>
+          <Tasks tasks={tasks} setTasks={setTasks} />
+          <Queue tasks={tasks} queue={queue} setQueue={setQueue} />
+        </>
+        )}
+
+      <Focus
+        tasks={tasks}
+        queue={queue}
+        setQueue={setQueue}
+        onFocusModeChange={setFocusActive}
+      />
+
+      {!focusActive && (
+        <>
+          <Reports tasks={tasks} />
+        </>
+      )}
 
       <footer>
         <p>Alpha note: your data is stored locally in your browser.</p>

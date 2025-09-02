@@ -11,6 +11,7 @@ type Props = {
   tasks: Task[];
   queue?: QueueItem[];
   setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
+  onFocusModeChange?: (active: boolean) => void;
 };
 
 type TimerState = "idle" | "running" | "paused";
@@ -33,7 +34,8 @@ const DEFAULT_SAVED: Saved = {
   endAtTs: null,
 };
 
-export default function Focus({ tasks, queue = [], setQueue } : Props) {
+export default function Focus({ tasks, queue = [], setQueue, onFocusModeChange } : Props) {
+  const [isFocusView, setIsFocusView] = React.useState(false);
   const [index, setIndex] = useState<number>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).index);
   const [remainingSec, setRemainingSec] = useState<number>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).remainingSec);
   const [state, setState] = useState<TimerState>(() => load<Saved>(STORAGE_KEY, DEFAULT_SAVED).state);
@@ -63,7 +65,8 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
       endAtTs: endAtTsRef.current ?? null,
     };
     save(STORAGE_KEY, payload);
-  }, [index, remainingSec, state, currentSessionId]);
+    onFocusModeChange?.(state !== "idle");
+  }, [index, remainingSec, state, currentSessionId, onFocusModeChange]);
 
   // Safeguards so we never crash when queue is empty
   const hasQueue = Array.isArray(queue) && queue.length > 0;
@@ -87,6 +90,7 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
     setRemainingSec(dur);
     setState("running");
     endAtTsRef.current = Date.now() + dur * 1000;
+    setIsFocusView(true);
   }, [currentItem]);
 
   const pause = useCallback(() => {
@@ -121,6 +125,7 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
       setRemainingSec(0);
       setIndex(0);
       endAtTsRef.current = null;
+      setIsFocusView(false);
       return;
     }
 
@@ -262,11 +267,16 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
           e.preventDefault();
           restartItem();
           break;
+        case "Escape":
+          if (!isFocusView) break;
+          e.preventDefault();
+          setIsFocusView(false);
+          break;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state, pause, resume, next, add5, restartItem]);
+  }, [state, pause, resume, next, add5, restartItem, isFocusView]);
 
   useEffect(() => {
     // If queue shrank and the current index is now invalid, reset
@@ -297,77 +307,112 @@ export default function Focus({ tasks, queue = [], setQueue } : Props) {
   }, [queue, safeIndex]);
 
   const showOnlyStart = state === "idle" && remainingSec === 0 && hasQueue;
+  const shouldInlineStart = showOnlyStart || !hasQueue;
+
+  useEffect(() => {
+    onFocusModeChange?.(!shouldInlineStart);
+  }, [onFocusModeChange, shouldInlineStart]);
 
   return (
-    <section>
-      <h2>Focus (queue runner)</h2>
-
-      {queue.length === 0 ? (
-        <p>Queue is empty. Add items above to start.</p>
-      ) : (
-        <>
-          <p>
-            Now: <strong>{currentTask?.title ?? "(unknown task)"}</strong>&nbsp;
-          </p>
-
-          {/* Countdown */}
-          <div style={{ fontSize: 48, fontVariantNumeric: "tabular-nums" }}>
+    shouldInlineStart ? (
+      // ===== Inline (setup) view =====
+      <div style={{ display: "flex", justifyContent: "center", margin: "16px 0" }}>
+        {!hasQueue ? (
+          <p style={{ opacity: 0.8 }}>Queue is empty. Add tasks above to start.</p>
+        ) : (
+          <button
+            onClick={start}
+            style={{
+              padding: "16px 28px",
+              fontSize: 22,
+              fontWeight: 700,
+              borderRadius: 10,
+              border: "1px solid #ccc",
+              background: "#f6f6f6",
+              minWidth: 240,
+            }}
+          >
+            Start
+          </button>
+        )}
+      </div>
+    ) : (
+      // ===== Fullscreen focus view =====
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "#0e0e10",
+          color: "#fff",
+          zIndex: 1000,
+          display: "grid",
+          gridTemplateRows: "1fr auto",
+          padding: 24,
+        }}
+      >
+        <div style={{ display: "grid", placeItems: "center", textAlign: "center" }}>
+          <div style={{ fontSize: 18, marginBottom: 6, opacity: 0.9 }}>
+            {currentTask?.title ?? "(unknown task)"}{/* won’t show when queue empty because we’re not in fullscreen then */}
+          </div>
+          <div
+            style={{
+              fontSize: 88,
+              lineHeight: 1,
+              fontVariantNumeric: "tabular-nums",
+              margin: "10px 0 14px",
+            }}
+            aria-live="polite"
+          >
             {fmt(remainingSec)}
           </div>
 
-          {/* Controls */}
-          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {showOnlyStart ? (
-              <button
-                onClick={start}
-                style={{ padding: "10px 18px", fontSize: 16 }}
-              >Start
-              </button>
+          {/* BIG NEXT */}
+          <button
+            onClick={next}
+            style={{
+              padding: "16px 28px",
+              fontSize: 22,
+              fontWeight: 700,
+              borderRadius: 10,
+              border: "1px solid #3a3a3a",
+              background: "#1d1d22",
+              minWidth: 240,
+            }}
+          >
+            Next ▶
+          </button>
+
+          {/* helpers */}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "center" }}>
+            {state === "running" ? (
+              <button onClick={pause}>Pause</button>
             ) : (
-              <>
-                <button
-                  onClick={next}
-                  style={{
-                    padding: "12px 22px",
-                    fontSize: 18,
-                    fontWeight: 600,
-                    border: "1px solid #ccc",
-                    borderRadius: 6,
-                    background: "#efefef"
-                  }}
-                >
-                  Next ▶
-                </button>
-                {state === "running"
-                  ? (<button onClick={pause}>Pause</button> )
-                  : ( <button onClick={resume} disabled={remainingSec === 0}>Resume</button>)
-                }
-                <button onClick={add5}>+5 min</button>
-                <button onClick={restartItem}>Restart</button>
-              </>
-              )}
+              <button onClick={resume} disabled={remainingSec === 0}>Resume</button>
+            )}
+            <button onClick={add5}>+5 min</button>
+            <button onClick={restartItem}>Restart</button>
           </div>
+        </div>
 
-          {/* Small hint */}
-          <p style={{ color: "#666", marginTop: 8 }}>
-            Shortcuts: Space = Pause/Resume • + = +5 min • → = Next
-          </p>
-
-          <details style={{ marginTop: 8 }}>
+        <div>
+          <details>
             <summary>Queue preview</summary>
             <ol style={{ paddingLeft: 18, marginTop: 8 }}>
               {queue.map((q, i) => {
                 const t = tasks.find(x => x.id === q.taskId);
                 return (
                   <li key={q.id} style={{ opacity: i < safeIndex ? 0.6 : 1 }}>
-                    {i === safeIndex ? <strong>{t?.title}</strong> : t?.title} - {Math.floor(q.durationSec / 60)} min
+                    {i === safeIndex ? <strong>{t?.title}</strong> : t?.title} – {Math.floor(q.durationSec / 60)} min
                   </li>
                 );
               })}
             </ol>
           </details>
-        </>
-      )}
-    </section>
+          <div style={{ color: "#aaa", fontSize: 12, marginTop: 8 }}>
+            Shortcuts: Space = Pause/Resume • + = +5 min • → = Next • R = Restart
+          </div>
+        </div>
+      </div>
+    )
   );
 }
